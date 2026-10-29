@@ -1,0 +1,32 @@
+[Unit]
+Description=KryptoBot - Binance Spot trading bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=cryptobot
+Group=cryptobot
+WorkingDirectory=/opt/crypto-bot
+ExecStart=/opt/crypto-bot/.venv/bin/python /opt/crypto-bot/main.py
+Restart=on-failure
+RestartSec=15
+SuccessExitStatus=78
+TimeoutStopSec=40
+KillSignal=SIGTERM
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/crypto-bot/data /opt/crypto-bot/logs
+
+[Install]
+WantedBy=multi-user.target
