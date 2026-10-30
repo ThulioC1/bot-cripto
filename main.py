@@ -15,6 +15,12 @@ from typing import Any
 
 import ccxt
 
+from analyzer import (
+    StatisticsEngine,
+    analyze_recent_market,
+    print_market_analysis,
+    print_statistics_report,
+)
 from config import Settings
 from exchange import (
     ExchangeClient,
@@ -37,6 +43,13 @@ from strategy import Signal, Strategy
 
 VERSION = "1.0.0"
 logger = logging.getLogger("bot.main")
+
+# Inicializar motor de estatísticas
+statistics = StatisticsEngine(settings=Settings(), history_size=500)
+
+# Contador para relatórios periodicos
+report_counter = 0
+REPORT_INTERVAL = 10  # A cada 10 ciclos (aprox. a cada 50 minutos)
 
 
 class BotHalted(RuntimeError):
@@ -250,15 +263,23 @@ class TradingBot:
 
     async def _scan_cycle(self) -> None:
         now = datetime.now(timezone.utc)
+        global report_counter
+        report_counter += 1
         self._candles_cache.clear()
         self._closed_this_cycle.clear()
         symbols = sorted(set(self.settings.symbols) | set(self.risk.positions))
         tickers = await self.exchange.fetch_tickers(symbols)
         if not tickers:
-            raise ccxt.NetworkError("Nenhum ticker disponivel.")
+            raise ccxt.NetworkError("Nenhum ticker disponível.")
         for symbol in self.risk.positions:
             if symbol not in tickers:
                 tickers[symbol] = await self.exchange.fetch_ticker(symbol)
+
+        # Registrar preços atuais no motor de estatísticas
+        for ticker in tickers.values():
+            price = _ticker_price(ticker)
+            if price > 0:
+                statistics.add_price(price, now)
 
         if self.settings.dry_run:
             equity = self.settings.paper_equity
@@ -341,6 +362,18 @@ class TradingBot:
                     symbol,
                     " | ".join(signal.reasons),
                 )
+                statistics.update_signal(
+                    {
+                        "action": signal.action.value,
+                        "score": signal.score,
+                        "max_score": signal.max_score,
+                        "stop_distance_pct": signal.stop_distance_pct,
+                        "atr_pct": signal.atr_pct,
+                        "reasons": signal.reasons,
+                    },
+                    signal.price,
+                    now,
+                )
                 candidates.append(signal)
             else:
                 logger.info(
@@ -416,6 +449,24 @@ class TradingBot:
                     - position.entry_fee_quote,
                 )
                 equity = max(0.0, equity - position.entry_fee_quote)
+
+        # Relatório periódico de estatísticas e mercado
+        if report_counter >= REPORT_INTERVAL:
+            report_counter = 0
+            stats_summary = statistics.get_summary()
+            print_statistics_report(stats_summary)
+            for symbol in self.settings.symbols:
+                ticker = tickers.get(symbol)
+                if ticker is None:
+                    continue
+                market = analyze_recent_market(
+                    self.exchange,
+                    symbol,
+                    self.settings.timeframe,
+                    self.settings,
+                )
+                print_market_analysis(market)
+                break
 
     def _compute_equity(
         self, balance: Mapping[str, Any], tickers: Mapping[str, Mapping[str, Any]]

@@ -18,6 +18,16 @@ O objetivo do projeto é executar uma estratégia conservadora com gestão de ri
 - Notificações opcionais por Telegram
 - Supervisão por PM2 ou systemd
 
+## Motor de Estatísticas
+
+O módulo `analyzer.py` implementa o `StatisticsEngine`, integrado ao ciclo de varredura em `main.py`:
+
+- `add_price(preco, timestamp)` — registra o preço de cada par a cada ciclo para histórico de retornos.
+- `update_signal(sinal, preco, timestamp)` — registra sinais de compra gerados pela estratégia.
+- `get_summary()` — win rate, profit factor, expected value, sequências de vitórias/derrotas e lucro/prejuízo acumulado.
+- `analyze_recent_market()` — análise técnica de candles recentes (retorno médio, volatilidade, taxa de acertos, ATR).
+- Relatórios impressos a cada `REPORT_INTERVAL` ciclos (padrão: 10 ciclos, aprox. 50 minutos em timeframe 15m).
+
 ## Modos de Operação
 
 | Modo | Variável de Ambiente | Descrição |
@@ -36,6 +46,7 @@ O objetivo do projeto é executar uma estratégia conservadora com gestão de ri
 
 ```
 main.py              orquestração, loop, reconciliação e proteção
+analyzer.py          motor de estatísticas, relatórios de desempenho e análise de mercado
 config.py            configuração e validação de limites
 exchange.py          integração ccxt/Binance, retries e permissões
 strategy.py          indicadores e sinal
