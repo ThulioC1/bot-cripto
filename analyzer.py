@@ -221,7 +221,7 @@ class StatisticsEngine:
         self.__init__(self.settings, self.history_size)
 
 
-def analyze_recent_market(
+async def analyze_recent_market(
     exchange, symbol: str, timeframe: str, settings: Settings
 ) -> dict[str, Any]:
     """
@@ -230,7 +230,7 @@ def analyze_recent_market(
     """
     try:
         # Buscar candles recentes
-        ohlcv = exchange.fetch_ohlcv(
+        ohlcv = await exchange.fetch_ohlcv(
             symbol, timeframe=timeframe, limit=min(100, settings.ohlcv_limit)
         )
 

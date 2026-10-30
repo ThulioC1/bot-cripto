@@ -459,7 +459,7 @@ class TradingBot:
                 ticker = tickers.get(symbol)
                 if ticker is None:
                     continue
-                market = analyze_recent_market(
+                market = await analyze_recent_market(
                     self.exchange,
                     symbol,
                     self.settings.timeframe,
