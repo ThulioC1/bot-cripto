@@ -28,6 +28,26 @@ O módulo `analyzer.py` implementa o `StatisticsEngine`, integrado ao ciclo de v
 - `analyze_recent_market()` — análise técnica de candles recentes (retorno médio, volatilidade, taxa de acertos, ATR).
 - Relatórios impressos a cada `REPORT_INTERVAL` ciclos (padrão: 10 ciclos, aprox. 50 minutos em timeframe 15m).
 
+## Dashboard Web
+
+Com a flag `--web`, o bot inicia um servidor HTTP (aiohttp) em `http://localhost:8080` com um dashboard HTML/JS (Chart.js) para acompanhar em tempo real:
+
+- `GET /` — dashboard com estatísticas, gráficos, posições abertas e decisões recentes.
+- `GET /api/stats` — resumo do `StatisticsEngine` (win rate, profit factor, expected value, drawdown).
+- `GET /api/positions` — posições abertas com entrada, stop, take-profit e notional.
+- `GET /api/trades` — histórico de fechamentos com PnL.
+- `GET /api/decisions` — sinais de entrada, execuções e saídas registrados pelo bot.
+- `GET /api/market?symbol=X` — análise técnica de candles recentes de um par.
+- `GET /api/health` — saúde do servidor.
+
+O cliente faz polling a cada 5s e atualiza cards, gráficos de equity/win-loss e tabelas sem recarregar a página.
+
+Exemplo:
+```bash
+py main.py --web
+# depois abra http://localhost:8080
+```
+
 ## Modos de Operação
 
 | Modo | Variável de Ambiente | Descrição |
@@ -52,7 +72,9 @@ exchange.py          integração ccxt/Binance, retries e permissões
 strategy.py          indicadores e sinal
 risk_manager.py      sizing, estado, circuit breaker e trailing
 logger.py            logs rotativos e Telegram
+web_server.py        servidor web opcional do dashboard (--web)
 tests/               testes unitários
+static/              dashboard HTML/JS do cliente web
 deploy/              configuração systemd
 ecosystem.config.js  configuração PM2
 .env.example         modelo de configuração

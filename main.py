@@ -40,6 +40,7 @@ from risk_manager import (
     TradeClose,
 )
 from strategy import Signal, Strategy
+from web_server import DashboardServer
 
 VERSION = "1.0.0"
 logger = logging.getLogger("bot.main")
@@ -83,8 +84,10 @@ def _ticker_price(ticker: Mapping[str, Any] | None) -> float:
 
 
 class TradingBot:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, web_enabled: bool = False) -> None:
         self.settings = settings
+        self.web_enabled = web_enabled
+        self.web_server: DashboardServer | None = None
         self.risk = RiskManager(settings)
         extra_symbols = tuple(
             symbol
@@ -136,6 +139,15 @@ class TradingBot:
                     self.settings.exchange_id,
                 )
             self._install_signal_handlers()
+            if self.web_enabled:
+                self.web_server = DashboardServer(
+                    self.settings,
+                    statistics,
+                    self.risk,
+                    exchange=self.exchange,
+                )
+                await self.web_server.start()
+                logger.info("Dashboard web em http://localhost:%s", self.web_server.port)
             self.alerter.notify(
                 f"{self.settings.bot_name} iniciado | modo={self._mode_label()} | "
                 f"pares={', '.join(self.settings.symbols)} | "
@@ -200,6 +212,8 @@ class TradingBot:
             logger.error("Rede indisponivel na inicializacao: %s", type(exc).__name__)
             return 1
         finally:
+            if self.web_server is not None:
+                await self.web_server.stop()
             await self.alerter.stop()
             await self.exchange.close()
             logger.info("Bot finalizado.")
@@ -260,6 +274,11 @@ class TradingBot:
             await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
         except asyncio.TimeoutError:
             pass
+
+    def _record_decision(self, action: str, **fields: object) -> None:
+        if self.web_server is None:
+            return
+        self.web_server.record_decision({"action": action, **fields})
 
     async def _scan_cycle(self) -> None:
         now = datetime.now(timezone.utc)
@@ -375,6 +394,17 @@ class TradingBot:
                     now,
                 )
                 candidates.append(signal)
+                self._record_decision(
+                    "signal",
+                    symbol=signal.symbol,
+                    action=signal.action.value,
+                    score=signal.score,
+                    max_score=signal.max_score,
+                    stop_distance_pct=signal.stop_distance_pct,
+                    atr_pct=signal.atr_pct,
+                    reasons=signal.reasons,
+                    price=signal.price,
+                )
             else:
                 logger.info(
                     "Sem entrada em %s: %s", symbol, signal.reasons[0]
@@ -859,6 +889,15 @@ class TradingBot:
         )
         logger.info(message)
         self.alerter.notify(message)
+        self._record_decision(
+            "entry",
+            symbol=symbol,
+            entry_price=entry_price,
+            stop_price=stop_price,
+            take_profit_price=take_profit_price,
+            notional=position.entry_notional,
+            amount=position.amount,
+        )
         return position
 
     async def _restore_stop_only(
@@ -1429,6 +1468,15 @@ class TradingBot:
             self.alerter.notify(message)
         else:
             logger.critical(message)
+        self._record_decision(
+            "exit",
+            symbol=close.symbol,
+            reason=close.reason,
+            exit_price=close.exit_price,
+            pnl_quote=close.pnl_quote,
+            pnl_pct=close.pnl_pct,
+            amount=close.amount,
+        )
 
     async def _reconcile_startup(self) -> None:
         if not self.risk.positions:
@@ -1623,6 +1671,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Forca modo dry-run, sem enviar ordens.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Inicia o servidor de dashboard web em http://localhost:8080.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1658,7 +1711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return asyncio.run(run_check(settings))
 
     try:
-        bot = TradingBot(settings)
+        bot = TradingBot(settings, web_enabled=args.web)
     except ExchangeConfigurationError as exc:
         logger.critical("Erro de configuracao da exchange: %s", exc)
         return 78

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KryptoBot — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0b0f19; color: #e2e8f0; padding: 24px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1e293b; }
+  h1 { font-size: 1.25rem; letter-spacing: -0.5px; }
+  .badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; background: #1e293b; color: #94a3b8; margin-left: auto; }
+  .badge.online { background: #064e3b; color: #bbf7d0; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 10px; }
+  .value { font-size: 1.75rem; font-weight: 700; margin-bottom: 4px; }
+  .sub { font-size: 0.85rem; color: #94a3b8; }
+  .pos { color: #22c55e; }
+  .neg { color: #ef4444; }
+  .neu { color: #94a3b8; }
+  section { margin-bottom: 24px; }
+  section h2 { font-size: 1rem; margin-bottom: 12px; color: #cbd5e1; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+  canvas { width: 100% !important; height: 260px !important; display: block; background: #0f172a; border-radius: 8px; border: 1px solid #1f2937; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; background: #0f172a; border-radius: 8px; overflow: hidden; border: 1px solid #1f2937; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #1f2937; }
+  th { background: #111827; color: #94a3b8; font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+  tr:hover { background: #1e293b; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+  .empty { color: #64748b; font-style: italic; padding: 16px; text-align: center; }
+  .small { font-size: 0.8rem; color: #94a3b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KryptoBot</h1>
+  <span class="badge online" id="badge-status">Online</span>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <h2>Win Rate</h2>
+    <div class="value neu" id="stat-winrate">— %</div>
+    <div class="sub" id="stat-winrate-detail">— trades</div>
+  </div>
+  <div class="card">
+    <h2>Profit Factor</h2>
+    <div class="value neu" id="stat-profitfactor">—</div>
+    <div class="sub">Lucro bruto / Perda bruta</div>
+  </div>
+  <div class="card">
+    <h2>Expected Value / trade</h2>
+    <div class="value neu" id="stat-ev">— %</div>
+    <div class="sub">Média esperada por operação</div>
+  </div>
+  <div class="card">
+    <h2>Drawdown 24h</h2>
+    <div class="value neu" id="stat-dd">— %</div>
+    <div class="sub">Contra pico de equity</div>
+  </div>
+</div>
+
+<section>
+  <h2>Desempenho</h2>
+  <div class="row">
+    <div>
+      <canvas id="chart-equity"></canvas>
+    </div>
+    <div>
+      <canvas id="chart-winloss"></canvas>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Posições Abertas</h2>
+  <table id="table-positions">
+    <thead>
+      <tr><th>Par</th><th>Entrada</th><th>Atual</th><th>Stop</th><th>Take Profit</th><th>Notional</th><th>PnL</th></tr>
+    </thead>
+    <tbody><tr><td colspan="7" class="empty">Carregando posições...</td></tr></tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Decisões Recentes</h2>
+  <table id="table-decisions">
+    <thead>
+      <tr><th>Hora</th><th>Par</th><th>Ação</th><th>Score</th><th>Stop %</th><th>Motivo</th></tr>
+    </thead>
+    <tbody><tr><td colspan="6" class="empty">Carregando decisões...</td></tr></tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Histórico de Trades (últimos 20)</h2>
+  <table id="table-trades">
+    <thead>
+      <tr><th>Par</th><th>Entrada</th><th>Saída</th><th>PnL (USDT)</th><th>PnL %</th><th>Motivo</th></tr>
+    </thead>
+    <tbody><tr><td colspan="6" class="empty">Carregando trades...</td></tr></tbody>
+  </table>
+</section>
+
+<script>
+const API = "/api";
+let charts = {};
+
+function fmt(n, d = 2) {
+  if (n == null || Number.isNaN(n)) return "—";
+  return n.toFixed(d);
+}
+function pct(n, d = 2) {
+  if (n == null || Number.isNaN(n)) return "—";
+  const s = n >= 0 ? "+" : "";
+  return s + n.toFixed(d) + "%";
+}
+function cls(n) {
+  if (n == null || Number.isNaN(n)) return "neu";
+  return n > 0 ? "pos" : n < 0 ? "neg" : "neu";
+}
+function ts(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleTimeString("pt-BR", { hour12: false }); } catch { return iso; }
+}
+
+async function get(path) {
+  try {
+    const r = await fetch(API + path, { cache: "no-store" });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+async function loadStats() {
+  const data = await get("/stats");
+  if (!data) return;
+  const wrap = (id, val, clsName, sub) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = val;
+    el.className = "value " + (clsName || "neu");
+    if (sub) {
+      const p = el.parentElement.querySelector(".sub");
+      if (p) p.textContent = sub;
+    }
+  };
+  wrap("stat-winrate", fmt(data.win_rate, 1) + " %", cls(data.win_rate - 50), data.winning_trades + " ganhos / " + data.losing_trades + " perdas");
+  wrap("stat-profitfactor", fmt(data.profit_factor, 2), "neu");
+  wrap("stat-ev", fmt(data.expected_value, 4) + " %", cls(data.expected_value));
+  wrap("stat-dd", "— %", "neu");
+}
+
+async function loadEquity() {
+  const trades = await get("/trades") || [];
+  const positions = await get("/positions") || {};
+  const canvas = document.getElementById("chart-equity");
+  const ctx = canvas.getContext("2d");
+  if (charts.equity) charts.equity.destroy();
+
+  let running = 1000;
+  const labels = [], data = [];
+  trades.forEach((t, i) => {
+    running += t.pnl_pct != null ? t.pnl_pct : 0;
+    labels.push("T" + (i + 1));
+    data.push(running);
+  });
+  if (data.length === 0) {
+    labels.push("—"); data.push(1000);
+  }
+
+  charts.equity = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets: [{ label: "Equity base 1000", data, borderColor: "#3b82f6", backgroundColor: "rgba(59,130,246,0.1)", fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: "#1f2937" } }, x: { grid: { color: "#1f2937" } } } }
+  });
+}
+
+async function loadWinLoss() {
+  const stats = await get("/stats") || {};
+  const canvas = document.getElementById("chart-winloss");
+  const ctx = canvas.getContext("2d");
+  if (charts.winloss) charts.winloss.destroy();
+  charts.winloss = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["Ganhos", "Perdas"],
+      datasets: [{ data: [stats.winning_trades || 0, stats.losing_trades || 0], backgroundColor: ["#22c55e", "#ef4444"], borderWidth: 0 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, cutout: "70%", plugins: { legend: { position: "bottom", labels: { color: "#94a3b8", font: { size: 12 } } } } }
+  });
+}
+
+async function loadPositions() {
+  const positions = await get("/positions") || {};
+  const tbody = document.querySelector("#table-positions tbody");
+  tbody.innerHTML = "";
+  const symbols = Object.keys(positions);
+  if (symbols.length === 0) {
+    tbody.innerHTML = "<tr><td colspan='7' class='empty'>Sem posições abertas.</td></tr>";
+    return;
+  }
+  for (const symbol of symbols) {
+    const p = positions[symbol];
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td class="mono">${symbol}</td>
+      <td>${fmt(p.entry_price, 2)}</td>
+      <td>—</td>
+      <td>${fmt(p.stop_price, 2)}</td>
+      <td>${fmt(p.take_profit_price, 2)}</td>
+      <td>${fmt(p.entry_notional, 2)}</td>
+      <td class="${cls(0)}">— %</td>
+    `;
+    tbody.appendChild(row);
+  }
+}
+
+async function loadDecisions() {
+  const decisions = await get("/decisions") || [];
+  const tbody = document.querySelector("#table-decisions tbody");
+  tbody.innerHTML = "";
+  if (decisions.length === 0) {
+    tbody.innerHTML = "<tr><td colspan='6' class='empty'>Nenhuma decisão registrada.</td></tr>";
+    return;
+  }
+  decisions.slice().reverse().forEach(d => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td class="mono small">${ts(d.timestamp)}</td>
+      <td class="mono">${d.symbol || "—"}</td>
+      <td>${d.action || d.action_type || "—"}</td>
+      <td>${d.score != null ? d.score : "—"}</td>
+      <td>${d.stop_distance_pct != null ? fmt(d.stop_distance_pct, 2) + "%" : "—"}</td>
+      <td class="small">${(d.reasons && d.reasons.join ? d.reasons.join(", ") : (d.reason || "—"))}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+async function loadTrades() {
+  const trades = await get("/trades") || [];
+  const tbody = document.querySelector("#table-trades tbody");
+  tbody.innerHTML = "";
+  if (trades.length === 0) {
+    tbody.innerHTML = "<tr><td colspan='6' class='empty'>Sem trades registrados.</td></tr>";
+    return;
+  }
+  trades.slice().reverse().slice(0, 20).forEach(t => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td class="mono">${t.symbol || "—"}</td>
+      <td>${fmt(t.entry_price, 2)}</td>
+      <td>${fmt(t.exit_price, 2)}</td>
+      <td class="${cls(t.pnl_quote)}">${fmt(t.pnl_quote, 2)}</td>
+      <td class="${cls(t.pnl_pct)}">${pct(t.pnl_pct)}</td>
+      <td class="small">${t.reason || "—"}</td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+async function refresh() {
+  await Promise.all([loadStats(), loadEquity(), loadWinLoss(), loadPositions(), loadDecisions(), loadTrades()]);
+}
+
+setInterval(refresh, 5000);
+refresh();
+</script>
+</body>
+</html>
